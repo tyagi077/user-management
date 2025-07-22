@@ -1,13 +1,17 @@
 function validateRequest(schema) {
-  function middleware(req, res, next) {
+  return function middleware(req, res, next) {
     const { error } = schema.validate(req.body);
     if (error) {
-      return res.status(400).json({ error: error.details[0].message });
+      // Determine page context by referrer
+      const ref = req.headers.referer || "";
+      if (ref.includes("add-user")) {
+        return res.render("addUser", { error: error.details[0].message, user: req.user });
+      } else {
+        return res.render("login", { error: error.details[0].message });
+      }
     }
     next();
   }
-
-  return middleware;
 }
 
 module.exports = validateRequest;

@@ -1,20 +1,23 @@
-const client = require("../config/db")
-const jwt = require("jsonwebtoken")
-require("dotenv").config()
+const client = require("../config/db");
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
+
 const addUser = async (req, res) => {
     const { username, email, password, role, created_by, updated_by } = req.body;
     try {
         const result = await client.query('insert into users(username,email,password,role,created_by,updated_by) values($1,$2,$3,$4,$5,$6) returning id', [username, email, password, role, created_by, updated_by])
 
-        res.status(201).json({
-            success: "true",
-            message: result.rows[0].id
-        })
+        // res.status(201).json({
+        //     success: "true",
+        //     message: result.rows[0].id
+        // })
+         res.redirect("/dashboard");
     } catch (err) {
-        res.status(400).json({
-            success: "false",
-            message: err.message
-        })
+        // res.status(400).json({
+        //     success: "false",
+        //     message: err.message
+        // })
+         res.render("addUser", { error: err.message });
     }
 }
 const loginUser = async (req, res) => {
@@ -23,7 +26,8 @@ const loginUser = async (req, res) => {
         const result = await client.query('select id,username,email,role,created_by,created_at,updated_by,updated_at from users where email =$1 and password =$2', [email, password])
         const user = result.rows[0];
         if (!user) {
-            return res.status(404).json({ success: false, message: 'User not found' });
+            res.render("login", { error: "User Not Found" });
+            return;
         }
         const payload = {
             id: user.id,
@@ -34,39 +38,40 @@ const loginUser = async (req, res) => {
         const token = jwt.sign(payload, process.env.JWT_SECRET, {
             expiresIn: process.env.JWT_EXPIRES_IN || '1d'
         })
-        res.status(200).json({
-            success: true,
-            message: 'Login successful',
-            token
-        });
+        res.cookie("token", token, { httpOnly: true });
+        res.redirect("/dashboard");
     } catch (err) {
-        res.status(500).json({
-            success: "false",
-            message: err.message
-        })
+        // res.status(500).json({
+        //     success: "false",
+        //     message: err.message
+        // })
+        res.render("login", { error: err.message });
+
     }
 }
-
 const updateUser = async (req, res) => {
     const { role } = req.body;
     const { id } = req.params;
     const requester = req.user;
     try {
 
-        const result = await client.query("select * from user where id =$1", [id]);
+        const result = await client.query("select * from users where id =$1", [id]);
         const targetUser = result.rows[0];
 
         if (!targetUser) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
 
-        // access
-        if (requester.role !== 'admin') {
-            return res.status(403).json({ success: false, message: 'Only admins can update users' });
+        if (requester.role === 'admin' && targetUser.role !== 'user') {
+            return res.status(403).json({
+                success: false,
+                message: 'Admin can only modify users with role "user"',
+            });
         }
 
-        if (targetUser.role === 'admin') {
-            return res.status(403).json({ success: false, message: 'Admins cannot modify other admins' });
+        // Superadmin can update anyone, admin can update only users
+        if (requester.role !== 'admin' && requester.role !== 'superadmin') {
+            return res.status(403).json({ success: false, message: 'Access denied' });
         }
 
 
@@ -76,10 +81,11 @@ const updateUser = async (req, res) => {
         );
 
 
-        res.status(200).json({
-            success: true,
-            message: `User with ID ${updateResult.rows[0].id} updated`,
-        });
+        // res.status(200).json({
+        //     success: true,
+        //     message: `User with ID ${updateResult.rows[0].id} updated`,
+        // });
+        res.redirect("/dashboard");
     } catch (err) {
         res.status(400).json({
             success: false,
@@ -88,37 +94,51 @@ const updateUser = async (req, res) => {
     }
 };
 const deleteUser = async (req, res) => {
-    const id = req.params;
+    const id = req.params.id;
     const requester = req.user;
+
     try {
-        const result = client.query("select * from users where id =$1", [id]);
+        const result = await client.query("SELECT * FROM users WHERE id = $1", [id]); // ✅ add await
         const targetUser = result.rows[0];
+
         if (!targetUser) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
 
-        // access
-        if (requester.role !== 'admin') {
-            return res.status(403).json({ success: false, message: 'Only admins can delete users' });
+        if (targetUser.role === 'superadmin') {
+            return res.status(403).json({ success: false, message: 'Cannot delete superadmin' });
         }
 
-        if (targetUser.role === 'admin') {
-            return res.status(403).json({ success: false, message: 'Admins cannot delete other admins' });
+        if (requester.role === 'admin' && targetUser.role !== 'user') {
+            return res.status(403).json({ success: false, message: 'Admin can only delete users with role "user"' });
         }
 
-        const updatedResult = client.query("delete from users where id =$1", [id]);
+        if (requester.role !== 'admin' && requester.role !== 'superadmin') {
+            return res.status(403).json({ success: false, message: 'Access denied' });
+        }
 
+        const deleteResult = await client.query("DELETE FROM users WHERE id = $1 RETURNING id", [id]); // ✅ add await
 
-        res.status(200).json({
-            success: true,
-            message: `User with ID ${updatedResult.rows[0].id} deleted`,
-        });
+        res.redirect("/dashboard"); // ✅ redirect to dashboard
     } catch (err) {
-        res.status(500).json({
-            success: false,
-            message: err.message,
-        });
+        res.status(500).json({ success: false, message: err.message });
     }
-}
+};
 
-module.exports = { addUser, loginUser, updateUser, deleteUser }
+const renderUser= async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await client.query("SELECT id,username,updated_by, created_by,updated_at,created_at,role FROM users WHERE id = $1", [id]);
+    const targetUser = result.rows[0];
+
+    if (!targetUser) return res.status(404).send("User not found");
+
+    res.render("editUser", { user: req.user, targetUser });
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+};
+
+
+
+module.exports = { addUser, loginUser, updateUser, deleteUser ,renderUser}
