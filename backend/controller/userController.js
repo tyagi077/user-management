@@ -2,6 +2,10 @@ const client = require("../config/db");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
+const loginPage = (req,res)=>{
+     res.render("login", { error: null });
+}
+
 const addUser = async (req, res) => {
     const { username, email, password, role, created_by, updated_by } = req.body;
     try {
@@ -20,6 +24,7 @@ const addUser = async (req, res) => {
          res.render("addUser", { error: err.message });
     }
 }
+
 const loginUser = async (req, res) => {
     const { email, password } = req.body;
     try {
@@ -139,6 +144,29 @@ const renderUser= async (req, res) => {
   }
 };
 
+const dashboardPage=(async (req, res) => {
+  try {
+    const result = await client.query("SELECT * FROM users ORDER BY id ASC");
+    res.render("dashboard", {
+      user: req.user,
+      users: result.rows
+    });
+  } catch (err) {
+    res.status(500).send("Failed to load dashboard");
+  }
+});
+
+const addUserForm=((req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+    return res.status(403).send("Access Denied");
+  }
+  res.render("addUser", { user: req.user });
+});
+
+const logout=((req, res) => {
+  res.clearCookie("token");
+  res.redirect("/");
+});
 
 
-module.exports = { addUser, loginUser, updateUser, deleteUser ,renderUser}
+module.exports = { addUser, loginUser, updateUser, deleteUser ,renderUser,loginPage,dashboardPage,addUserForm,logout}
